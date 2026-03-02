@@ -36,9 +36,6 @@ impl Scenario for ChatMediaUploadScenario {
             .execute(&mut self.context)
             .await?;
 
-        // Note: MLS membership is auto-finalized when welcome is received,
-        // so members can participate immediately without explicit accept
-
         // Upload image with default options (includes blurhash generation)
         UploadChatImageTestCase::basic()
             .with_account("media_uploader")

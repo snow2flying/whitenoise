@@ -36,9 +36,6 @@ impl Scenario for AdvancedMessagingScenario {
             .execute(&mut self.context)
             .await?;
 
-        // Note: MLS membership is auto-finalized when welcome is received,
-        // so members can participate immediately without explicit accept
-
         // Send initial message that will receive reactions
         SendMessageTestCase::basic()
             .with_sender("adv_msg_sender")
