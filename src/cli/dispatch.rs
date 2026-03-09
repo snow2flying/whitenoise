@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use mdk_core::prelude::{GroupId, NostrGroupConfigData};
-use nostr_sdk::{PublicKey, Timestamp};
+use nostr_sdk::{PublicKey, RelayUrl, Timestamp};
 use tokio::io::AsyncWriteExt;
 
 use crate::Whitenoise;
 use crate::whitenoise::accounts_groups::AccountGroup;
 use crate::whitenoise::app_settings::{Language, ThemeMode};
+use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::UserSyncMode;
 
 use super::protocol::{Request, Response};
@@ -775,6 +776,13 @@ async fn resolve_display_name(wn: &Whitenoise, pubkey: &PublicKey) -> Option<Str
         .cloned()
 }
 
+fn cli_group_relay_urls() -> Vec<RelayUrl> {
+    Relay::defaults()
+        .into_iter()
+        .map(|relay| relay.url)
+        .collect()
+}
+
 async fn create_group(
     wn: &Whitenoise,
     account_str: &str,
@@ -789,19 +797,13 @@ async fn create_group(
         .map(|s| parse_pubkey(s))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let relays = account
-        .inbox_relays(wn)
-        .await
-        .map_err(|e| Response::err(format!("failed to get relays: {e}")))?;
-    let relay_urls = relays.into_iter().map(|r| r.url).collect();
-
     let config = NostrGroupConfigData::new(
         name,
         description.unwrap_or_default(),
         None, // image_hash
         None, // image_key
         None, // image_nonce
-        relay_urls,
+        cli_group_relay_urls(),
         vec![account.pubkey], // admins — creator only
     );
 

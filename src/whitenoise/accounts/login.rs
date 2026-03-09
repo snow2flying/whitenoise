@@ -399,6 +399,7 @@ impl Whitenoise {
         let merged = self.merge_into_stash(pubkey, discovered)?;
 
         if merged.is_complete() {
+            self.sync_discovered_relay_lists(&account, &merged).await?;
             self.complete_login(
                 &account,
                 merged.relays(RelayType::Inbox),
@@ -700,6 +701,7 @@ impl Whitenoise {
         let merged = self.merge_into_stash(pubkey, discovered)?;
 
         if merged.is_complete() {
+            self.sync_discovered_relay_lists(&account, &merged).await?;
             self.complete_external_signer_login(&account, merged.relays(RelayType::Inbox), signer)
                 .await?;
             self.pending_logins.remove(pubkey);
@@ -773,27 +775,29 @@ impl Whitenoise {
         let inbox_relays = inbox_result.map_err(LoginError::from)?;
         let key_package_relays = key_package_result.map_err(LoginError::from)?;
 
-        // Persist only the lists that were actually found so the DB reflects
-        // what exists on the network, not assumed defaults.
-        let user = account
-            .user(&self.database)
-            .await
-            .map_err(LoginError::from)?;
-        if let Some(ref relays) = nip65_relays {
-            user.add_relays(relays, RelayType::Nip65, &self.database)
-                .await
-                .map_err(LoginError::from)?;
-        }
-        if let Some(ref relays) = inbox_relays {
-            user.add_relays(relays, RelayType::Inbox, &self.database)
-                .await
-                .map_err(LoginError::from)?;
-        }
-        if let Some(ref relays) = key_package_relays {
-            user.add_relays(relays, RelayType::KeyPackage, &self.database)
-                .await
-                .map_err(LoginError::from)?;
-        }
+        // Persist the exact discovered network state, including empty results,
+        // so stale relay rows are removed when a relay list no longer exists.
+        self.sync_account_relays(
+            account,
+            nip65_relays.as_deref().unwrap_or(&[]),
+            RelayType::Nip65,
+        )
+        .await
+        .map_err(LoginError::from)?;
+        self.sync_account_relays(
+            account,
+            inbox_relays.as_deref().unwrap_or(&[]),
+            RelayType::Inbox,
+        )
+        .await
+        .map_err(LoginError::from)?;
+        self.sync_account_relays(
+            account,
+            key_package_relays.as_deref().unwrap_or(&[]),
+            RelayType::KeyPackage,
+        )
+        .await
+        .map_err(LoginError::from)?;
 
         Ok(DiscoveredRelayLists {
             nip65: nip65_relays,
@@ -818,6 +822,35 @@ impl Whitenoise {
         let snapshot = stash.clone();
         drop(stash);
         Ok(snapshot)
+    }
+
+    async fn sync_discovered_relay_lists(
+        &self,
+        account: &Account,
+        discovered: &DiscoveredRelayLists,
+    ) -> core::result::Result<(), LoginError> {
+        self.sync_account_relays(
+            account,
+            discovered.relays(RelayType::Nip65),
+            RelayType::Nip65,
+        )
+        .await
+        .map_err(LoginError::from)?;
+        self.sync_account_relays(
+            account,
+            discovered.relays(RelayType::Inbox),
+            RelayType::Inbox,
+        )
+        .await
+        .map_err(LoginError::from)?;
+        self.sync_account_relays(
+            account,
+            discovered.relays(RelayType::KeyPackage),
+            RelayType::KeyPackage,
+        )
+        .await
+        .map_err(LoginError::from)?;
+        Ok(())
     }
 
     /// Activate a local-key account after relay lists have been resolved.
