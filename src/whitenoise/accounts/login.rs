@@ -5,6 +5,7 @@ use super::{
     LoginStatus,
 };
 use crate::RelayType;
+use crate::perf_instrument;
 use crate::whitenoise::error::Result;
 use crate::whitenoise::relays::Relay;
 use crate::whitenoise::users::User;
@@ -15,6 +16,7 @@ impl Whitenoise {
     ///
     /// This method generates a new keypair, sets up the account with default relay lists,
     /// and fully configures the account for use in Whitenoise.
+    #[perf_instrument("accounts")]
     pub async fn create_identity(&self) -> Result<Account> {
         let keys = Keys::generate();
         tracing::debug!(target: "whitenoise::accounts", "Generated new keypair: {}", keys.public_key().to_hex());
@@ -25,6 +27,7 @@ impl Whitenoise {
         Ok(account)
     }
 
+    #[perf_instrument("accounts")]
     async fn create_identity_with_keys(&self, keys: &Keys) -> Result<Account> {
         let mut account = self.create_base_account_with_private_key(keys).await?;
         tracing::debug!(target: "whitenoise::accounts", "Keys stored in secret store and account saved to database");
@@ -57,6 +60,7 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `nsec_or_hex_privkey` - The user's private key as a nsec string or hex-encoded string.
+    #[perf_instrument("accounts")]
     pub async fn login(&self, nsec_or_hex_privkey: String) -> Result<Account> {
         let keys = Keys::parse(&nsec_or_hex_privkey)?;
         let pubkey = keys.public_key();

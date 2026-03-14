@@ -14,6 +14,7 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc::Sender};
 use super::{RelaySessionConfig, RelaySessionRelayPolicy, notifications::RelayNotification};
 use crate::{
     nostr_manager::{NostrManagerError, Result},
+    perf_instrument,
     relay_control::{
         SubscriptionContext, SubscriptionStream,
         observability::{RelayTelemetry, RelayTelemetryKind},
@@ -117,11 +118,13 @@ impl RelaySession {
         false
     }
 
+    #[perf_instrument("relay")]
     pub(crate) async fn ensure_relays_connected(&self, relay_urls: &[RelayUrl]) -> Result<()> {
         self.prepare_relay_urls(relay_urls).await?;
         Ok(())
     }
 
+    #[perf_instrument("relay")]
     async fn prepare_relay_urls(&self, relay_urls: &[RelayUrl]) -> Result<PreparedRelayUrls> {
         if relay_urls.is_empty() {
             return Ok(PreparedRelayUrls {
@@ -271,6 +274,8 @@ impl RelaySession {
         })
     }
 
+    #[allow(dead_code)]
+    #[perf_instrument("relay")]
     pub(crate) async fn fetch_events_from(
         &self,
         relay_urls: &[RelayUrl],
@@ -355,6 +360,7 @@ impl RelaySession {
         }
     }
 
+    #[perf_instrument("relay")]
     pub(crate) async fn publish_event_to(
         &self,
         relay_urls: &[RelayUrl],
@@ -458,11 +464,13 @@ impl RelaySession {
         }
     }
 
+    #[perf_instrument("relay")]
     pub(crate) async fn remove_relay(&self, relay_url: &RelayUrl) -> Result<()> {
         self.client.force_remove_relay(relay_url.clone()).await?;
         Ok(())
     }
 
+    #[perf_instrument("relay")]
     pub(crate) async fn subscribe_with_id_to(
         &self,
         relay_urls: &[RelayUrl],
@@ -608,6 +616,7 @@ impl RelaySession {
         }
     }
 
+    #[perf_instrument("relay")]
     pub(crate) async fn unsubscribe(&self, subscription_id: &SubscriptionId) {
         if let Some(relay_urls) = self
             .state
@@ -625,6 +634,7 @@ impl RelaySession {
         self.client.unsubscribe(subscription_id).await;
     }
 
+    #[perf_instrument("relay")]
     pub(crate) async fn shutdown(&self) {
         self.state.subscription_relays.write().await.clear();
         self.router.clear().await;
@@ -633,6 +643,7 @@ impl RelaySession {
     }
 
     #[allow(dead_code)]
+    #[perf_instrument("relay")]
     pub(crate) async fn unsubscribe_all(&self) {
         let subscription_ids: Vec<SubscriptionId> = self
             .state
@@ -891,6 +902,7 @@ impl RelaySession {
         });
     }
 
+    #[perf_instrument("relay")]
     async fn process_notification(
         notification: RelayNotification,
         plane: crate::relay_control::RelayPlane,
@@ -1015,6 +1027,7 @@ impl RelaySession {
         }
     }
 
+    #[perf_instrument("relay")]
     async fn ensure_relay_in_client(&self, relay_url: &RelayUrl) -> Result<bool> {
         match self.client.relay(relay_url).await {
             Ok(_) => Ok(false),

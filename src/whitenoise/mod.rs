@@ -51,6 +51,7 @@ use mdk_core::prelude::MDK;
 use mdk_sqlite_storage::MdkSqliteStorage;
 
 use crate::init_tracing;
+use crate::perf_instrument;
 use crate::relay_control::RelayControlPlane;
 use crate::relay_control::discovery::DiscoveryPlaneConfig;
 
@@ -394,6 +395,7 @@ impl Whitenoise {
     /// # Arguments
     ///
     /// * `config` - A [`WhitenoiseConfig`] struct specifying the data and log directories.
+    #[perf_instrument("whitenoise")]
     pub async fn initialize_whitenoise(config: WhitenoiseConfig) -> Result<()> {
         init_timing::start();
 
@@ -555,6 +557,7 @@ impl Whitenoise {
         Ok(())
     }
 
+    #[perf_instrument("whitenoise")]
     pub async fn setup_all_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         // Global (discovery plane) and per-account (inbox + group planes) subscriptions
         // operate on completely disjoint relay sessions with no shared mutable state,
@@ -570,6 +573,7 @@ impl Whitenoise {
         Ok(())
     }
 
+    #[perf_instrument("whitenoise")]
     async fn setup_global_users_subscriptions(whitenoise_ref: &Whitenoise) -> Result<()> {
         let accounts = Account::all(&whitenoise_ref.database).await?;
         if accounts.is_empty() {
@@ -595,6 +599,7 @@ impl Whitenoise {
     // - Assumes at least one account exists (caller checked signer presence)
     // - If any account is unsynced (last_synced_at = None), return None
     // - Otherwise, use min(last_synced_at) minus a 10s buffer, floored at 0
+    #[perf_instrument("whitenoise")]
     async fn compute_global_since_timestamp(
         whitenoise_ref: &Whitenoise,
     ) -> Result<Option<nostr_sdk::Timestamp>> {
@@ -633,6 +638,7 @@ impl Whitenoise {
         Ok(since)
     }
 
+    #[perf_instrument("whitenoise")]
     async fn setup_accounts_subscriptions(whitenoise_ref: &'static Whitenoise) -> Result<()> {
         let accounts = Account::all(&whitenoise_ref.database).await?;
         for account in accounts {
@@ -693,6 +699,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
+    #[perf_instrument("whitenoise")]
     pub async fn shutdown(&self) -> Result<()> {
         tracing::info!(target: "whitenoise::shutdown", "Initiating graceful shutdown");
 
@@ -709,6 +716,7 @@ impl Whitenoise {
     /// It deletes the nostr cache, database, MLS-related directories, media cache, and all log files.
     /// If the MLS directory exists, it is removed and then recreated as an empty directory.
     /// This is useful for resetting the application to a clean state.
+    #[perf_instrument("whitenoise")]
     pub async fn delete_all_data(&self) -> Result<()> {
         tracing::debug!(target: "whitenoise::delete_all_data", "Deleting all data");
 
@@ -757,6 +765,7 @@ impl Whitenoise {
     ///
     /// Sends shutdown signal to all running tasks and waits for them to complete.
     /// Any panicked tasks are logged but do not cause this method to fail.
+    #[perf_instrument("whitenoise")]
     async fn shutdown_scheduled_tasks(&self) {
         tracing::info!(target: "whitenoise::scheduler", "Initiating scheduler shutdown");
 
@@ -796,10 +805,12 @@ impl Whitenoise {
     ///
     /// This is primarily useful for integration testing to verify the scheduler is running.
     #[cfg(feature = "integration-tests")]
+    #[perf_instrument("whitenoise")]
     pub(crate) async fn scheduler_task_count(&self) -> usize {
         self.scheduler_handles.lock().await.len()
     }
 
+    #[perf_instrument("whitenoise")]
     pub async fn export_account_nsec(&self, account: &Account) -> Result<String> {
         if account.uses_external_signer() {
             return Err(WhitenoiseError::ExternalSignerCannotExportNsec);
@@ -812,6 +823,7 @@ impl Whitenoise {
             .unwrap())
     }
 
+    #[perf_instrument("whitenoise")]
     pub async fn export_account_npub(&self, account: &Account) -> Result<String> {
         Ok(account.pubkey.to_bech32().unwrap())
     }
@@ -824,6 +836,7 @@ impl Whitenoise {
     ///
     /// Returns an error if the account does not exist, is not an external
     /// signer account, or if the signer's pubkey does not match.
+    #[perf_instrument("whitenoise")]
     pub async fn register_external_signer<S>(&self, pubkey: PublicKey, signer: S) -> Result<()>
     where
         S: NostrSigner + 'static,
@@ -879,6 +892,7 @@ impl Whitenoise {
     /// This is for internal use where the caller has already verified that the
     /// account uses an external signer (e.g., during login or test setup).
     /// The signer's pubkey is still validated to prevent mismatched signers.
+    #[perf_instrument("whitenoise")]
     pub(crate) async fn insert_external_signer<S>(&self, pubkey: PublicKey, signer: S) -> Result<()>
     where
         S: NostrSigner + 'static,
@@ -956,6 +970,7 @@ impl Whitenoise {
     ///
     /// # Returns
     /// A [`message_streaming::GroupMessageSubscription`] containing initial messages and a broadcast receiver
+    #[perf_instrument("whitenoise")]
     pub async fn subscribe_to_group_messages(
         &self,
         group_id: &mdk_core::prelude::GroupId,
@@ -1011,6 +1026,7 @@ impl Whitenoise {
     /// - Subscription is established BEFORE fetching to capture concurrent updates
     /// - Any updates that arrived during fetch are merged into `initial_items`
     /// - The receiver only yields updates AFTER the initial snapshot
+    #[perf_instrument("whitenoise")]
     pub async fn subscribe_to_chat_list(
         &self,
         account: &Account,
@@ -1062,6 +1078,7 @@ impl Whitenoise {
     ///
     /// Same race-condition-free design as `subscribe_to_chat_list`, but uses
     /// `get_archived_chat_list` and the archived stream manager.
+    #[perf_instrument("whitenoise")]
     pub async fn subscribe_to_archived_chat_list(
         &self,
         account: &Account,
@@ -1134,6 +1151,7 @@ impl Whitenoise {
     /// Used as the fallback relay set when a user has no stored NIP-65 relays.
     /// Discovery fallback is owned by the discovery plane rather than whatever
     /// other relays happen to be connected for unrelated workloads.
+    #[perf_instrument("whitenoise")]
     pub(crate) async fn fallback_relay_urls(&self) -> Vec<RelayUrl> {
         self.relay_control.discovery().relays().to_vec()
     }
@@ -1147,6 +1165,7 @@ impl Whitenoise {
     /// yet implemented. Callers should not rely on this being cheap for large
     /// user sets — prefer batching multiple user updates and calling
     /// `refresh_all_global_subscriptions` once instead.
+    #[perf_instrument("whitenoise")]
     pub(crate) async fn refresh_global_subscription_for_user(&self) -> Result<()> {
         self.sync_discovery_subscriptions().await?;
         Ok(())
@@ -1155,11 +1174,13 @@ impl Whitenoise {
     /// Refreshes discovery subscriptions for all watched users across all
     /// relay batches. Use after bulk user discovery (e.g. contact-list
     /// processing) where many users may have changed simultaneously.
+    #[perf_instrument("whitenoise")]
     pub(crate) async fn refresh_all_global_subscriptions(&self) -> Result<()> {
         self.sync_discovery_subscriptions().await?;
         Ok(())
     }
 
+    #[perf_instrument("whitenoise")]
     pub async fn ensure_account_subscriptions(&self, account: &Account) -> Result<()> {
         let is_operational = self.is_account_subscriptions_operational(account).await?;
 
@@ -1175,6 +1196,7 @@ impl Whitenoise {
         Ok(())
     }
 
+    #[perf_instrument("whitenoise")]
     pub async fn ensure_global_subscriptions(&self) -> Result<()> {
         let is_operational = self.is_global_subscriptions_operational().await?;
 
@@ -1222,6 +1244,7 @@ impl Whitenoise {
     /// # Ok(())
     /// # }
     /// ```
+    #[perf_instrument("whitenoise")]
     pub async fn ensure_all_subscriptions(&self) -> Result<()> {
         // Best-effort: log and continue on error
         if let Err(e) = self.ensure_global_subscriptions().await {
@@ -1253,6 +1276,7 @@ impl Whitenoise {
     ///
     /// Returns true if the account inbox plane exists and at least one of its
     /// relays is connected or connecting.
+    #[perf_instrument("whitenoise")]
     pub async fn is_account_subscriptions_operational(&self, account: &Account) -> Result<bool> {
         Ok(self
             .relay_control
@@ -1264,15 +1288,18 @@ impl Whitenoise {
     ///
     /// Returns true if at least one relay (from the client pool) is connected or connecting
     /// AND at least one global subscription exists.
+    #[perf_instrument("whitenoise")]
     pub async fn is_global_subscriptions_operational(&self) -> Result<bool> {
         Ok(self.relay_control.has_discovery_subscriptions().await)
     }
 
     /// Returns a live in-memory snapshot of relay-plane state for debugging.
+    #[perf_instrument("whitenoise")]
     pub async fn get_relay_control_state(&self) -> RelayControlStateSnapshot {
         self.relay_control.snapshot().await
     }
 
+    #[perf_instrument("whitenoise")]
     async fn sync_discovery_subscriptions(&self) -> Result<()> {
         let watched_users = User::all_pubkeys(&self.database).await?;
         let follow_list_accounts = Account::all(&self.database)
@@ -1289,12 +1316,14 @@ impl Whitenoise {
     }
 
     #[cfg(feature = "integration-tests")]
+    #[perf_instrument("whitenoise")]
     pub async fn wipe_database(&self) -> Result<()> {
         self.database.delete_all_data().await?;
         Ok(())
     }
 
     #[cfg(feature = "integration-tests")]
+    #[perf_instrument("whitenoise")]
     pub async fn reset_nostr_client(&self) -> Result<()> {
         self.relay_control.reset_for_tests().await?;
         Ok(())
