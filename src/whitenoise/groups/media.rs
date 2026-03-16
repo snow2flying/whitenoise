@@ -7,6 +7,7 @@ use mdk_core::media_processing::MediaProcessingOptions;
 use mdk_core::prelude::{GroupId, group_types};
 use mdk_storage_traits::Secret;
 use nostr_blossom::client::BlossomClient;
+use nostr_sdk::prelude::hashes::{Hash, sha256::Hash as Sha256Hash};
 use nostr_sdk::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -21,7 +22,7 @@ use crate::whitenoise::media_files::MediaFileUpload;
 impl Whitenoise {
     /// Default timeout for Blossom HTTP operations (download and upload)
     /// Set to 300 seconds to accommodate large image files over slow connections
-    const BLOSSOM_TIMEOUT: Duration = Duration::from_secs(300);
+    pub(crate) const BLOSSOM_TIMEOUT: Duration = Duration::from_secs(300);
 
     /// Returns the default Blossom server URL based on build configuration
     ///
@@ -649,14 +650,28 @@ impl Whitenoise {
             .await
     }
 
+    /// Rejects non-HTTPS Blossom URLs to prevent cleartext metadata leakage.
+    /// Debug builds also allow `http://localhost` for local testing.
+    pub(crate) fn require_https(url: &Url) -> Result<()> {
+        match url.scheme() {
+            "https" => Ok(()),
+            "http" if cfg!(debug_assertions) && url.host_str() == Some("localhost") => Ok(()),
+            _ => Err(WhitenoiseError::BlossomInsecureUrl(url.to_string())),
+        }
+    }
+
+    /// Blossom client that enforces HTTPS on the server URL.
+    pub(crate) fn blossom_client(url: &Url) -> Result<BlossomClient> {
+        Self::require_https(url)?;
+        Ok(BlossomClient::new(url.clone()))
+    }
+
     #[perf_instrument("media")]
     async fn download_blob_from_blossom(
         blossom_url: &Url,
         image_hash: &[u8; 32],
     ) -> Result<Vec<u8>> {
-        use nostr::hashes::{Hash, sha256::Hash as Sha256Hash};
-
-        let client = BlossomClient::new(blossom_url.clone());
+        let client = Self::blossom_client(blossom_url)?;
         let sha256 = Sha256Hash::from_slice(image_hash)
             .map_err(|e| WhitenoiseError::Other(anyhow::anyhow!("Invalid SHA256 hash: {}", e)))?;
 
@@ -836,7 +851,7 @@ impl Whitenoise {
         mime_type: &str,
         upload_keypair: &Keys,
     ) -> Result<nostr_blossom::bud02::BlobDescriptor> {
-        let client = BlossomClient::new(blossom_server_url.clone());
+        let client = Self::blossom_client(blossom_server_url)?;
         let upload_future = client.upload_blob(
             encrypted_data,
             Some(mime_type.to_string()),
@@ -844,7 +859,7 @@ impl Whitenoise {
             Some(upload_keypair),
         );
 
-        tokio::time::timeout(Self::BLOSSOM_TIMEOUT, upload_future)
+        let descriptor = tokio::time::timeout(Self::BLOSSOM_TIMEOUT, upload_future)
             .await
             .map_err(|_| {
                 WhitenoiseError::Other(anyhow::anyhow!(
@@ -852,6 +867,51 @@ impl Whitenoise {
                     Self::BLOSSOM_TIMEOUT.as_secs()
                 ))
             })?
-            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))
+            .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
+
+        Self::require_https(&descriptor.url)?;
+
+        Ok(descriptor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blossom_client_accepts_https() {
+        let url = Url::parse("https://blossom.primal.net").unwrap();
+        assert!(Whitenoise::blossom_client(&url).is_ok());
+    }
+
+    #[test]
+    fn blossom_client_rejects_http() {
+        let url = Url::parse("http://evil.example.com").unwrap();
+        let err = Whitenoise::blossom_client(&url).unwrap_err();
+        assert!(
+            matches!(err, WhitenoiseError::BlossomInsecureUrl(_)),
+            "Expected BlossomInsecureUrl, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn blossom_client_rejects_ftp() {
+        let url = Url::parse("ftp://files.example.com/blob").unwrap();
+        assert!(Whitenoise::blossom_client(&url).is_err());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn blossom_client_allows_localhost_http_in_debug() {
+        let url = Url::parse("http://localhost:3000").unwrap();
+        assert!(Whitenoise::blossom_client(&url).is_ok());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn blossom_client_rejects_non_localhost_http_in_debug() {
+        let url = Url::parse("http://192.168.1.1:3000").unwrap();
+        assert!(Whitenoise::blossom_client(&url).is_err());
     }
 }

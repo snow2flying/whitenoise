@@ -1,16 +1,14 @@
 mod login;
 mod setup;
 
-use std::fmt;
-use std::path::Path;
-use std::str::FromStr;
-
 use chrono::{DateTime, Utc};
 use mdk_core::prelude::*;
 use mdk_sqlite_storage::MdkSqliteStorage;
-use nostr_blossom::client::BlossomClient;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::path::Path;
+use std::str::FromStr;
 use thiserror::Error;
 
 use crate::RelayType;
@@ -516,19 +514,28 @@ impl Account {
         server: Url,
         whitenoise: &Whitenoise,
     ) -> Result<String> {
-        let client = BlossomClient::new(server);
+        let client = Whitenoise::blossom_client(&server)?;
         let signer = whitenoise.get_signer_for_account(self)?;
         let data = tokio::fs::read(file_path).await?;
 
-        let descriptor = client
-            .upload_blob(
-                data,
-                Some(image_type.mime_type().to_string()),
-                None,
-                Some(&signer),
-            )
+        let upload_future = client.upload_blob(
+            data,
+            Some(image_type.mime_type().to_string()),
+            None,
+            Some(&signer),
+        );
+
+        let descriptor = tokio::time::timeout(Whitenoise::BLOSSOM_TIMEOUT, upload_future)
             .await
+            .map_err(|_| {
+                WhitenoiseError::Other(anyhow::anyhow!(
+                    "Upload timed out after {} seconds",
+                    Whitenoise::BLOSSOM_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|err| WhitenoiseError::Other(anyhow::anyhow!(err)))?;
+
+        Whitenoise::require_https(&descriptor.url)?;
 
         Ok(descriptor.url.to_string())
     }
